@@ -102,6 +102,19 @@ pytest, ≥80% coverage:
 - Streaming reader tests for fixed, ODO-variable, and RDW record formats.
 - Golden-file integration test: sample EBCDIC file + copybook → byte-exact expected output.
 
+### Sample fixtures (team answers, 2026-07-16)
+
+We generate our own banking-domain sample files (no real data available):
+
+- **CUSTOMER** dataset: customer_id, customer_name, age, dob, street_address, city, zipcode,
+  SIN number, plus related fields (phone, email, credit card number, account balance) —
+  exercising COMP-3, COMP, zoned decimal, and OCCURS.
+- **ACCOUNT** dataset: customer_id, account_type, account_opening_dt, last_update_dt, plus
+  related fields (branch code, balance, status, interest rate).
+- Each dataset in two encodings: **EBCDIC cp037** and **ASCII**, both fixed-length (FB).
+- Environment: Java runtime is available.
+- Masked SIN numbers must pass Luhn checksum validation.
+
 ## Out of scope
 
 - Multi-record-type files (multiple copybooks per file / record-type dispatch).

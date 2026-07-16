@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(git add docs/superpowers/specs/2026-07-15-mainframe-anonymizer-design.md)",
+      "PowerShell(git commit -m \"docs: add mainframe anonymizer design spec\")",
+      "PowerShell(git add docs/questions-for-team.md)",
+      "PowerShell(git commit -m \"docs: add team questionnaire for environment details\")",
+      "PowerShell(git branch -M main)",
+      "PowerShell(git remote add origin https://github.com/dataman266/Mainframe_Anonymizer.git)",
+      "PowerShell(git push -u origin main)",
+      "PowerShell(git add -A)",
+      "PowerShell(git commit -m \"docs: record team answers on fixtures, encodings, and SIN checksum\")",
+      "Powe
