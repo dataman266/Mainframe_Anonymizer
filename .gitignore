@@ -7,3 +7,6 @@ htmlcov/
 output/
 *.egg-info/
 build/
+dist/
+.env
+*.log
