@@ -36,7 +36,7 @@ def _build(el: ET.Element) -> Field:
     else:
         length = 0
     children = tuple(_build(c) for c in el.findall("item"))
-    if children and not length_attr:
+    if children and length_attr is None:
         length = sum(c.length * (c.occurs or 1) for c in children)
     return Field(
         name=el.get("name", "FILLER"),
@@ -45,7 +45,7 @@ def _build(el: ET.Element) -> Field:
         length=length,
         picture=picture,
         usage=usage,
-        numeric=bool(info and info.numeric),
+        numeric=bool((el.get("numeric") == "true") or (info and info.numeric)),
         signed=bool(info and info.signed) or el.get("signed") == "true",
         total_digits=info.total_digits if info else 0,
         decimals=info.decimals if info else 0,
@@ -67,18 +67,25 @@ def _shift(f: Field, delta: int, suffix: str) -> Field:
 
 
 def _collect(f: Field, shift: int, in_redefines: bool,
-             leaves: list[Field], overlays: list[Field]) -> None:
+             leaves: list[Field], overlays: list[Field],
+             suffix_prefix: str = "") -> None:
+    if f.is_group and f.depending_on:
+        raise UnsupportedCopybookError(
+            "OCCURS DEPENDING ON on a group is not supported")
     in_redefines = in_redefines or f.redefines is not None
     reps = f.occurs or 1
     for i in range(reps):
         suffix = f"({i + 1})" if f.occurs else ""
+        combined_suffix = f"{suffix_prefix}{suffix}"
         delta = shift + i * f.length
         if f.is_group:
             for c in f.children:
-                # group instance suffix is carried by shifting children only
-                _collect(c, delta, in_redefines, leaves, overlays)
+                # instance suffix accumulates through nested groups so each
+                # descendant leaf gets a unique "(group)(leaf)" style name
+                _collect(c, delta, in_redefines, leaves, overlays,
+                         combined_suffix)
         else:
-            leaf = _shift(f, delta, suffix)
+            leaf = _shift(f, delta, combined_suffix)
             (overlays if in_redefines else leaves).append(leaf)
 
 
@@ -86,6 +93,11 @@ def _find_odo(leaves: list[Field], record_length: int) -> OdoInfo | None:
     odo_leaves = [f for f in leaves if f.depending_on]
     if not odo_leaves:
         return None
+    counter_names = {f.depending_on for f in odo_leaves}
+    if len(counter_names) > 1:
+        raise UnsupportedCopybookError(
+            "Multiple OCCURS DEPENDING ON arrays with different counters "
+            "are not supported")
     first = min(odo_leaves, key=lambda f: f.offset)
     array_offset = first.offset
     element_length = first.length

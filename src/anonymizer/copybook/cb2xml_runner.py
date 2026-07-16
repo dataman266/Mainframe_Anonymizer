@@ -33,9 +33,14 @@ def parse_copybook(copybook_path: Path, jar_path: Path = DEFAULT_JAR) -> Layout:
             "copybook but was not found. Please install Java and try again.")
     if not jar_path.exists():
         raise CopybookParseError(f"cb2xml jar not found at {jar_path}")
-    result = subprocess.run(
-        [java, "-cp", str(jar_path), _MAIN_CLASS, str(copybook_path)],
-        capture_output=True, text=True, timeout=_TIMEOUT_SECONDS)
+    try:
+        result = subprocess.run(
+            [java, "-cp", str(jar_path), _MAIN_CLASS, str(copybook_path)],
+            capture_output=True, text=True, timeout=_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise CopybookParseError(
+            f"The copybook parser timed out after {_TIMEOUT_SECONDS} seconds."
+        ) from exc
     if result.returncode != 0 or not result.stdout.strip() or "<item" not in result.stdout:
         detail = (result.stderr or result.stdout or "").strip()[-800:]
         raise CopybookParseError(

@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -44,4 +45,16 @@ def test_java_missing_error_message(monkeypatch):
     import anonymizer.copybook.cb2xml_runner as runner
     monkeypatch.setattr(runner, "find_java", lambda: None)
     with pytest.raises(JavaNotFoundError, match="Java"):
+        runner.parse_copybook(SAMPLES / "customer.cpy")
+
+
+def test_subprocess_timeout_raises_friendly_error(monkeypatch):
+    import anonymizer.copybook.cb2xml_runner as runner
+
+    def fake_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="java", timeout=60)
+
+    monkeypatch.setattr(runner, "find_java", lambda: "java")
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    with pytest.raises(CopybookParseError, match="timed out"):
         runner.parse_copybook(SAMPLES / "customer.cpy")
