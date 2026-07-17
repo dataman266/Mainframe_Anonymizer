@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import os
-from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import BinaryIO, Iterator
 
@@ -44,8 +43,8 @@ def _iter_odo(f: BinaryIO, layout: Layout, codepage: str) -> Iterator[bytes]:
         if len(head) < odo.array_offset:
             raise TruncatedRecordError("file ended inside a record header")
         try:
-            count = int(Decimal(decode_field(odo.counter, head, codepage)))
-        except (FieldCodecError, InvalidOperation) as exc:
+            count = int(decode_field(odo.counter, head, codepage))
+        except (FieldCodecError, ValueError) as exc:
             raise TruncatedRecordError(
                 f"ODO counter {odo.counter.name} could not be decoded: {exc}"
             ) from exc
@@ -58,8 +57,8 @@ def _iter_odo(f: BinaryIO, layout: Layout, codepage: str) -> Iterator[bytes]:
         yield head + body
 
 
-def iter_records(path: Path, layout: Layout, codepage: str,
-                 rdw: bool = False) -> Iterator[bytes]:
+def _iterate(path: Path, layout: Layout, codepage: str,
+             rdw: bool) -> Iterator[bytes]:
     with open(path, "rb") as f:
         if rdw:
             yield from _iter_rdw(f)
@@ -67,6 +66,33 @@ def iter_records(path: Path, layout: Layout, codepage: str,
             yield from _iter_odo(f, layout, codepage)
         else:
             yield from _iter_fixed(f, layout.record_length)
+
+
+def iter_records(path: Path, layout: Layout, codepage: str,
+                 rdw: bool = False) -> Iterator[bytes]:
+    """Return an iterator over the fixed, RDW, or ODO records in ``path``.
+
+    The path and layout are validated eagerly, before any generator is
+    created, so a missing file or a degenerate layout (e.g. a zero-length
+    fixed record, or an ODO header with no bytes) raises immediately at
+    call time rather than on first iteration. The returned generator holds
+    the file open until it is exhausted or closed; callers that stop
+    iterating early should call ``.close()`` on it to release the handle.
+    """
+    os.stat(path)
+    if layout.odo is not None:
+        if layout.odo.array_offset <= 0:
+            raise ValueError(
+                "ODO array_offset must be positive, got "
+                f"{layout.odo.array_offset}")
+        counter = layout.odo.counter
+        if counter.offset + counter.length > layout.odo.array_offset:
+            raise ValueError(
+                "ODO counter field extends past the record header")
+    elif not rdw and layout.record_length <= 0:
+        raise ValueError(
+            f"record_length must be positive, got {layout.record_length}")
+    return _iterate(path, layout, codepage, rdw)
 
 
 def validate_fixed_file(path: Path, layout: Layout) -> str | None:

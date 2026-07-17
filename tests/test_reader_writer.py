@@ -89,6 +89,64 @@ def test_odo_corrupt_counter_raises_handled_error(tmp_path):
     """A non-numeric ODO counter must surface as a handled error, not crash."""
     p = tmp_path / "o.dat"
     p.write_bytes(b"XX" + b"1" * 16)
-    from anonymizer.codec.dispatch import FieldCodecError
-    with pytest.raises((FieldCodecError, TruncatedRecordError)):
+    with pytest.raises(TruncatedRecordError):
         list(iter_records(p, _odo_layout(), "ascii"))
+
+
+def test_odo_zero_array_offset_raises_valueerror(tmp_path):
+    p = tmp_path / "o.dat"
+    p.write_bytes(b"garbage")
+    counter = Field(name="CNT", level=5, offset=0, length=2, picture="9(02)",
+                    numeric=True, total_digits=2)
+    root = Field(name="REC", level=1, offset=0, length=16)
+    odo = OdoInfo(counter=counter, element_length=8, max_count=3, array_offset=0)
+    layout = Layout(name="REC", record_length=16, root=root,
+                    leaves=(counter,), overlays=(), odo=odo)
+    with pytest.raises(ValueError):
+        iter_records(p, layout, "ascii")
+
+
+def test_fixed_zero_record_length_raises_valueerror(tmp_path):
+    p = tmp_path / "f.dat"
+    p.write_bytes(b"data")
+    with pytest.raises(ValueError):
+        iter_records(p, _fixed_layout(0), "ascii")
+
+
+def test_iter_records_missing_file_raises_immediately(tmp_path):
+    missing = tmp_path / "missing.dat"
+    with pytest.raises(FileNotFoundError):
+        iter_records(missing, _fixed_layout(4), "ascii")
+
+
+def test_odo_counter_field_overflows_header_raises_valueerror(tmp_path):
+    p = tmp_path / "o.dat"
+    p.write_bytes(b"0012345678")
+    counter = Field(name="CNT", level=5, offset=0, length=5, picture="9(05)",
+                    numeric=True, total_digits=5)
+    root = Field(name="REC", level=1, offset=0, length=10)
+    odo = OdoInfo(counter=counter, element_length=8, max_count=3, array_offset=2)
+    layout = Layout(name="REC", record_length=10, root=root,
+                    leaves=(counter,), overlays=(), odo=odo)
+    with pytest.raises(ValueError):
+        iter_records(p, layout, "ascii")
+
+
+def test_odo_zero_count_yields_head_only(tmp_path):
+    p = tmp_path / "o.dat"
+    p.write_bytes(b"00")
+    layout = _odo_layout()
+    assert list(iter_records(p, layout, "ascii")) == [b"00"]
+
+
+def test_rdw_zero_length_payload(tmp_path):
+    p = tmp_path / "v.dat"
+    p.write_bytes(b"\x00\x04\x00\x00")
+    layout = _fixed_layout(3)
+    assert list(iter_records(p, layout, "ascii", rdw=True)) == [b""]
+
+
+def test_write_record_rdw_overflow_raises_valueerror():
+    buf = io.BytesIO()
+    with pytest.raises(ValueError, match="65,531"):
+        write_record(buf, b"A" * 70000, rdw=True)
