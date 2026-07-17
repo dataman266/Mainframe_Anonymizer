@@ -28,6 +28,8 @@ def pack_comp3(value: Decimal, total_digits: int, decimals: int,
                signed: bool) -> bytes:
     scaled = int(value.scaleb(decimals).to_integral_value(rounding=ROUND_HALF_UP))
     negative = scaled < 0
+    if negative and not signed:
+        raise ValueError(f"value {value} is negative but field is unsigned")
     digit_str = str(abs(scaled))
     if len(digit_str) > total_digits:
         raise ValueError(

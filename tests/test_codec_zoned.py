@@ -40,3 +40,13 @@ def test_ascii_signed_overpunch():
 def test_overflow_raises():
     with pytest.raises(ValueError):
         encode_zoned(Decimal("1234"), 3, 0, False, "ascii")
+
+
+def test_encode_unsigned_negative_raises():
+    with pytest.raises(ValueError):
+        encode_zoned(Decimal("-5"), 3, 0, False, "cp037")
+
+
+def test_decode_ascii_unsigned_rejects_overpunch():
+    with pytest.raises(ValueError):
+        decode_zoned(b"12N", 0, False, "ascii")
