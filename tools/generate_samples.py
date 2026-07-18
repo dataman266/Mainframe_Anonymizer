@@ -61,6 +61,8 @@ def account_row(fake: Faker, i: int) -> dict[str, str]:
 
 
 def encode_row(layout: Layout, row: dict[str, str], codepage: str) -> bytes:
+    # Faker text (e.g. street addresses) can exceed field width; encode_text
+    # silently truncates to field.length, which is intentional here.
     record = bytearray(" ".encode(codepage) * layout.record_length)
     for field in layout.leaves:
         value = row.get(field.name, "0" if field.numeric else "")
@@ -72,6 +74,9 @@ def encode_row(layout: Layout, row: dict[str, str], codepage: str) -> bytes:
 def generate(copybook: str, row_fn, count: int, stem: str) -> None:
     layout = parse_copybook(ROOT / "samples" / "copybooks" / copybook)
     fake = Faker()
+    # Byte-for-byte reproducibility of the committed .dat files holds only
+    # for the installed Faker version (no upper pin); regenerating after a
+    # Faker upgrade will produce different, equally-valid fixtures.
     fake.seed_instance(42)
     rows = [row_fn(fake, i) for i in range(count)]
     for codepage in ("cp037", "ascii"):

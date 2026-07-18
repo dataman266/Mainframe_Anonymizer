@@ -12,6 +12,8 @@ from anonymizer.pipeline import default_plans, run_anonymization
 ROOT = Path(__file__).resolve().parents[1]
 CPY = ROOT / "samples" / "copybooks" / "customer.cpy"
 DATA = ROOT / "samples" / "data" / "customer.cp037.dat"
+ACCOUNT_CPY = ROOT / "samples" / "copybooks" / "account.cpy"
+ACCOUNT_DATA = ROOT / "samples" / "data" / "account.cp037.dat"
 
 pytestmark = pytest.mark.skipif(find_java() is None, reason="java not installed")
 
@@ -19,6 +21,11 @@ pytestmark = pytest.mark.skipif(find_java() is None, reason="java not installed"
 @pytest.fixture(scope="module")
 def layout():
     return parse_copybook(CPY)
+
+
+@pytest.fixture(scope="module")
+def account_layout():
+    return parse_copybook(ACCOUNT_CPY)
 
 
 def test_end_to_end_masking(tmp_path, layout):
@@ -76,11 +83,37 @@ def test_ascii_variant_end_to_end(tmp_path, layout):
     assert out.stat().st_size == data.stat().st_size
 
 
-def test_cross_file_referential_integrity(tmp_path, layout):
-    """Same value + same rule + same seed -> same masked value (join keys)."""
+def test_cross_file_referential_integrity(tmp_path, layout, account_layout):
+    """Same value + same rule + same seed -> same masked value, even across
+    two distinct Field objects from different copybooks (customer.CUST-ID
+    and account.ACCT-CUST-ID). This is what makes customer<->account joins
+    survive masking: the masked value must depend only on
+    (value, rule, seed), never on the Field identity, or the same real-world
+    ID would mask differently in each file and break the join.
+    """
     from anonymizer.masking.rules import apply_rule
-    by_name = {f.name: f for f in layout.leaves}
-    cust_id = by_name["CUST-ID"]
+    cust_id = {f.name: f for f in layout.leaves}["CUST-ID"]
+    acct_cust_id = {f.name: f for f in account_layout.leaves}["ACCT-CUST-ID"]
     a = apply_rule("digits", "10000007", cust_id, "golden")
-    b = apply_rule("digits", "10000007", cust_id, "golden")
+    b = apply_rule("digits", "10000007", acct_cust_id, "golden")
     assert a == b
+
+
+def test_account_end_to_end(tmp_path, account_layout):
+    out = tmp_path / "masked_account.dat"
+    plans = default_plans(account_layout)
+    result = run_anonymization(ACCOUNT_DATA, out, account_layout, "cp037",
+                               plans, seed="golden", target_count=120)
+    assert result.records_written == 120
+    assert out.stat().st_size == ACCOUNT_DATA.stat().st_size  # layout preserved
+
+    from anonymizer.masking.rules import apply_rule
+    by_name = {f.name: f for f in account_layout.leaves}
+    acct_cust_id = by_name["ACCT-CUST-ID"]
+    original = next(iter_records(ACCOUNT_DATA, account_layout, "cp037"))
+    masked = next(iter_records(out, account_layout, "cp037"))
+    before = decode_field(acct_cust_id, original, "cp037")
+    after = decode_field(acct_cust_id, masked, "cp037")
+    # Masking must be consistent with the rule a customer-file join key
+    # would use for the same ID and seed (real record -> no synthesis salt).
+    assert after == apply_rule("digits", before, acct_cust_id, "golden")
