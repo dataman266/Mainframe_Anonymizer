@@ -33,6 +33,40 @@ data in EBCDIC cp037 and ASCII).
 - **Private**: no network calls; the seed is never written to any output;
   temporary files are cleaned up automatically.
 
+## The masking seed
+The seed (step 4 of the wizard) is the secret key that drives how every value
+is disguised. The same seed + the same input value always produces the same
+masked value — across files and across runs.
+
+- **Reuse one seed for files that must join.** Customer and account files
+  masked with the same seed turn the same `customer_id` into the same masked
+  ID in both files, so downstream joins keep working. Different seeds break
+  that link.
+- **Keep the seed to reproduce a dataset.** Re-running with the same seed
+  regenerates the exact same masked output; a new seed gives a completely
+  different (equally valid) one.
+- **Treat it like a password.** The seed is the only thing that ties masked
+  values back to a masking run, so store it in a password vault and never
+  ship it alongside the masked data. The audit report records only a short
+  fingerprint of the seed, never the seed itself.
+
+The wizard pre-fills a random seed. For real use, pick one seed per test-data
+universe (e.g. per environment or release cycle), record it in your vault,
+and reuse it for every related file.
+
+## The output file (`masked_output.dat`)
+The download in step 5 is a mainframe data file, not a CSV. It preserves the
+input's exact byte layout: same record length, same field positions, same
+encoding (EBCDIC in, EBCDIC out), same COMP-3/COMP representations. Only the
+contents of the fields you chose to mask are different. Feed it to your
+downstream ingestion jobs with the same copybook as the original file — no
+conversion needed. (An EBCDIC output will look like gibberish in a text
+editor; that is expected. Read it with the copybook.)
+
+Alongside it you can download `audit_report.md`, which lists every field,
+the rule applied to it, the record counts (real vs synthesized), and the
+seed fingerprint.
+
 ## Copybook support
 COMP-3 (packed), COMP (binary), zoned decimal, OCCURS, REDEFINES (masked via
 the primary view), and OCCURS DEPENDING ON (as the last field in the record).
