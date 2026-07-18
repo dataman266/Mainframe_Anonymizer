@@ -23,6 +23,8 @@ from anonymizer.engine.reader import (TruncatedRecordError, iter_records,
 from anonymizer.masking.rules import (RULES, apply_rule, is_rule_compatible,
                                       rule_label)
 from anonymizer.pipeline import FieldPlan, default_plans, run_anonymization
+from anonymizer.seedstore import (SeedStoreError, default_store_path,
+                                  load_seeds, save_seed)
 from anonymizer.ui.helpers import describe_field, detect_encoding
 
 MIN_RECORDS, MAX_RECORDS = 5, 1_000_000
@@ -280,6 +282,53 @@ def render_rules() -> None:
         st.rerun()
 
 
+def _render_seed_vault() -> None:
+    """Optional team seed vault: pick a saved seed by name, or save this one.
+
+    The vault is a single encrypted file; put it on a shared drive so the
+    whole team uses the same seeds for related files.
+    """
+    with st.expander("🔐 Team seed vault (optional)"):
+        st.caption("Reuse a named team seed so related files stay joinable. "
+                   "The vault file is encrypted with your team passphrase "
+                   "and can live on a shared drive.")
+        store_path = Path(st.text_input(
+            "Vault file location", value=str(default_store_path()),
+            key="vault_path"))
+        passphrase = st.text_input("Team passphrase", type="password",
+                                   key="vault_pass")
+        if not passphrase:
+            st.info("Enter the team passphrase to open or create the vault.")
+            return
+        try:
+            seeds = load_seeds(store_path, passphrase)
+        except SeedStoreError as exc:
+            st.error(str(exc))
+            return
+        if seeds:
+            options = [
+                f"{name}  (saved {info['saved']})"
+                for name, info in sorted(seeds.items())]
+            chosen = st.selectbox("Saved seeds", options, key="vault_pick")
+            if st.button("Use this seed"):
+                name = chosen.split("  (saved ")[0]
+                st.session_state.seed = seeds[name]["seed"]
+                st.success(f"Now using team seed '{name}'.")
+                st.rerun()
+        else:
+            st.caption("The vault is empty so far.")
+        save_name = st.text_input(
+            "Save the current seed under a name (e.g. SIT-2026Q3)",
+            key="vault_save_name")
+        if save_name and st.button("Save current seed to vault"):
+            try:
+                save_seed(store_path, passphrase, save_name,
+                          st.session_state.seed)
+                st.success(f"Seed saved as '{save_name}'.")
+            except SeedStoreError as exc:
+                st.error(str(exc))
+
+
 def render_generate() -> None:
     st.subheader("Step 4 — Generate the masked file")
     layout = st.session_state.layout
@@ -301,6 +350,7 @@ def render_generate() -> None:
         "Masking seed (keep it to reproduce the same masked values)",
         value=st.session_state.seed)
     st.session_state.seed = seed or secrets.token_hex(8)
+    _render_seed_vault()
     col1, col2 = st.columns(2)
     if col1.button("Back"):
         st.session_state.step = 2

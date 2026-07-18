@@ -87,9 +87,34 @@ synthesis when you need volume, not linkage.
 
 - **One seed per test-data universe.** Typically one per environment or per
   release cycle. Every file that must interoperate is masked with that seed.
-- **Store it in a password vault**, named clearly (e.g.
-  `anonymizer-seed-SIT-2026Q3`). Never email it alongside masked data, never
-  commit it to a repo, never put it in a file share next to the outputs.
+- **Store it safely**, named clearly (e.g. `anonymizer-seed-SIT-2026Q3`).
+  Never email it alongside masked data, never commit it to a repo, never put
+  it in a file share next to the outputs.
+
+### The built-in team seed vault
+
+The wizard's step 4 has a **"🔐 Team seed vault"** panel that solves the
+"where do we keep the seed?" problem without any extra infrastructure:
+
+- The vault is a **single encrypted file** (`seedstore.enc`). Put it on a
+  shared network drive so the whole team uses one vault. Point the app at it
+  either in the panel's "Vault file location" field or via the
+  `ANONYMIZER_SEEDSTORE` environment variable; the default is
+  `~/.mainframe_anonymizer/seedstore.enc` (personal, single-user).
+- It is protected by a **team passphrase**: the passphrase is stretched with
+  PBKDF2-HMAC-SHA256 (600,000 iterations) into the encryption key. Without
+  the passphrase the file is unreadable, so it is safe to store on a shared
+  drive. Saving to an existing vault also requires the correct passphrase.
+- **Workflow:** the first person generates a seed, opens the vault panel,
+  enters the team passphrase, and saves the seed under a name like
+  `SIT-2026Q3`. Everyone masking a related file afterwards opens the same
+  vault, picks `SIT-2026Q3` from the dropdown, and clicks *Use this seed* —
+  no copy-pasting seeds over chat or email.
+- **Honest limit:** the vault is as strong as the passphrase. Use a long
+  one, share it only through your normal secure channel, and if your
+  organization has an enterprise secret manager (CyberArk, Vault, Azure Key
+  Vault), that remains the gold standard — this file is the pragmatic
+  team-level alternative.
 - **The audit report contains only a fingerprint** (first 8 hex chars of
   SHA-256 of the seed) — enough to answer "were these two files masked with
   the same seed?" without exposing the seed. Compare fingerprints across

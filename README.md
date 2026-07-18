@@ -51,8 +51,11 @@ masked value — across files and across runs.
   fingerprint of the seed, never the seed itself.
 
 The wizard pre-fills a random seed. For real use, pick one seed per test-data
-universe (e.g. per environment or release cycle), record it in your vault,
-and reuse it for every related file.
+universe (e.g. per environment or release cycle) and reuse it for every
+related file. Step 4's **Team seed vault** panel stores named seeds in an
+encrypted file (protect it with a team passphrase; place it on a shared drive
+or set `ANONYMIZER_SEEDSTORE`) so teammates can pick the right seed by name
+instead of passing secrets around.
 
 For the full details — cross-file joins, staggered file deliveries, what can
 silently break consistency, seed management, and security properties — see
