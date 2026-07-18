@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from anonymizer.copybook.model import Field
 
+# Keyword matching below is unanchored substring search (e.g. "AGE" also
+# matches inside "PACKAGE"), not word-boundary matching. This trades some
+# false positives for simplicity; copybook field names are short and
+# hyphen-segmented in practice, which keeps false hits rare.
 _KEEP_KEYWORDS = ("FILLER", "TYPE", "STATUS", "CODE", "IND", "FLAG")
 _RULE_KEYWORDS: tuple[tuple[tuple[str, ...], str], ...] = (
     (("SIN", "SSN"), "sin"),
