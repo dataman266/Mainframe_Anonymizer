@@ -10,6 +10,9 @@ from anonymizer.pipeline import FieldPlan, RunResult
 
 def build_audit_report(result: RunResult, plans: list[FieldPlan], seed: str,
                        input_name: str, output_name: str) -> str:
+    # 8 hex chars is for display/reference only (e.g. to eyeball that two
+    # runs used the same seed) — it is not collision-resistant enough to be
+    # treated as a uniqueness guarantee.
     fingerprint = hashlib.sha256(seed.encode("utf-8")).hexdigest()[:8]
     when = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     lines = [

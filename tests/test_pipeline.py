@@ -2,8 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from anonymizer.codec.dispatch import decode_field, encode_field
-from anonymizer.copybook.model import Field, Layout
+from anonymizer import pipeline
+from anonymizer.codec.dispatch import FieldCodecError, decode_field, encode_field
+from anonymizer.copybook.model import Field, Layout, OdoInfo
+from anonymizer.engine.reader import iter_records
+from anonymizer.engine.writer import write_record
 from anonymizer.pipeline import FieldPlan, default_plans, run_anonymization
 
 NAME = Field(name="CUST-NAME", level=5, offset=0, length=10)
@@ -110,6 +113,7 @@ def test_empty_input_raises(tmp_path):
     src.write_bytes(b"")
     with pytest.raises(ValueError, match="empty"):
         run_anonymization(src, dst, _layout(), "ascii", _plans(), "s1", 5)
+    assert not dst.exists()
 
 
 def test_incompatible_plan_rejected_before_run(tmp_path):
@@ -126,3 +130,108 @@ def test_default_plans_uses_classifier():
     by_name = {p.field.name: p for p in plans}
     assert by_name["CUST-SIN"].rule == "sin" and by_name["CUST-SIN"].enabled
     assert by_name["REC-TYPE"].rule == "keep" and not by_name["REC-TYPE"].enabled
+
+
+def _corrupt_record2_sin(src: Path) -> None:
+    """Overwrite record 2's SIN bytes with non-digit ascii text so decoding
+    that field raises FieldCodecError."""
+    data = bytearray(src.read_bytes())
+    rec2_start = 1 * RECLEN
+    data[rec2_start + 10:rec2_start + 19] = b"XXXXXXXXX"
+    src.write_bytes(bytes(data))
+
+
+def test_field_codec_error_includes_record_number(tmp_path):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    _write_input(src, ROWS)
+    _corrupt_record2_sin(src)
+    with pytest.raises(FieldCodecError, match="record 2"):
+        run_anonymization(src, dst, _layout(), "ascii", _plans(), "s1", 3)
+
+
+def test_failed_run_leaves_no_output_or_tmp_file(tmp_path):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    _write_input(src, ROWS)
+    _corrupt_record2_sin(src)
+    with pytest.raises(FieldCodecError):
+        run_anonymization(src, dst, _layout(), "ascii", _plans(), "s1", 3)
+    assert not dst.exists()
+    assert not dst.with_suffix(dst.suffix + ".tmp").exists()
+
+
+def test_synthesis_reuses_cached_records_instead_of_reopening(tmp_path, monkeypatch):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    _write_input(src, ROWS)
+    calls: list[int] = []
+    original = pipeline.iter_records
+
+    def counting_iter_records(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "iter_records", counting_iter_records)
+    result = run_anonymization(src, dst, _layout(), "ascii", _plans(), "s1", 10)
+    assert result.records_written == 10
+    assert len(calls) == 1
+
+
+def test_target_count_below_one_raises(tmp_path):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    _write_input(src, ROWS)
+    with pytest.raises(ValueError, match="target_count must be at least 1"):
+        run_anonymization(src, dst, _layout(), "ascii", _plans(), "s1", 0)
+
+
+def test_rdw_roundtrip_masks_and_preserves_record_count(tmp_path):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    layout = _layout()
+    with open(src, "wb") as f:
+        for name, sin, rtype in ROWS:
+            rec = bytearray(RECLEN)
+            rec[0:10] = encode_field(NAME, name, "ascii")
+            rec[10:19] = encode_field(SIN, sin, "ascii")
+            rec[19:20] = encode_field(TYPE, rtype, "ascii")
+            write_record(f, bytes(rec), rdw=True)
+
+    result = run_anonymization(src, dst, layout, "ascii", _plans(), "s1", 3, rdw=True)
+    assert result.records_written == 3
+
+    out_records = list(iter_records(dst, layout, "ascii", rdw=True))
+    assert len(out_records) == 3
+    assert decode_field(NAME, out_records[0], "ascii").strip() != "JOHN SMITH"
+    assert decode_field(TYPE, out_records[0], "ascii") == "A"
+
+
+CNT = Field(name="CNT", level=5, offset=0, length=2, picture="9(02)",
+           numeric=True, total_digits=2)
+ELEM0 = Field(name="ELEM0", level=5, offset=2, length=8)
+ELEM1 = Field(name="ELEM1", level=5, offset=10, length=8)
+
+
+def _odo_layout() -> Layout:
+    root = Field(name="REC", level=1, offset=0, length=26)
+    odo = OdoInfo(counter=CNT, element_length=8, max_count=3, array_offset=2)
+    return Layout(name="REC", record_length=26, root=root,
+                  leaves=(CNT, ELEM0, ELEM1), overlays=(), odo=odo)
+
+
+def test_odo_roundtrip_preserves_length_and_counter(tmp_path):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    rec1 = b"02" + b"AAAAAAAA" + b"BBBBBBBB"    # count=2 -> 18 bytes
+    rec2 = b"01" + b"CCCCCCCC"                   # count=1 -> 10 bytes
+    src.write_bytes(rec1 + rec2)
+    layout = _odo_layout()
+    plans = [FieldPlan(field=CNT, rule="keep", enabled=False),
+             FieldPlan(field=ELEM0, rule="scramble", enabled=True),
+             FieldPlan(field=ELEM1, rule="scramble", enabled=True)]
+
+    result = run_anonymization(src, dst, layout, "ascii", plans, "s1", 2)
+    assert result.records_written == 2
+
+    out_records = list(iter_records(dst, layout, "ascii"))
+    assert len(out_records) == 2
+    assert len(out_records[0]) == len(rec1)
+    assert len(out_records[1]) == len(rec2)
+    assert out_records[0][:2] == b"02"           # counter untouched
+    assert out_records[1][:2] == b"01"
+    assert out_records[0] != rec1                 # masked elements differ
