@@ -58,7 +58,8 @@ def rule_sin(value: str, field: Field, seed: str, salt: str) -> str:
     digits = "".join(str(rng.randint(0, 9)) for _ in range(9))
     candidate = make_luhn_valid(digits)
     if candidate == value:                      # astronomically unlikely
-        candidate = make_luhn_valid("1" + digits[1:])
+        bumped = str((int(digits[0]) + 1) % 10)
+        candidate = make_luhn_valid(bumped + digits[1:])
     return candidate
 
 
