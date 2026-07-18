@@ -38,3 +38,8 @@ def test_pack_overflow_raises():
 def test_unpack_garbage_raises():
     with pytest.raises(ValueError):
         unpack_comp3(bytes([0xAB, 0xCD]), 0)  # A/B are not decimal digits
+
+
+def test_pack_unsigned_negative_raises():
+    with pytest.raises(ValueError):
+        pack_comp3(Decimal("-5"), 3, 0, False)

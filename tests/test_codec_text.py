@@ -1,3 +1,5 @@
+import pytest
+
 from anonymizer.codec.text import decode_text, encode_text
 
 
@@ -19,3 +21,8 @@ def test_encode_truncates_to_field_length():
 def test_encode_replaces_unmappable_chars():
     out = encode_text("CAFÉ☃", 6, "ascii")
     assert len(out) == 6
+
+
+def test_decode_strict_raises_on_invalid_bytes():
+    with pytest.raises(UnicodeDecodeError):
+        decode_text(b"\xff", "ascii")

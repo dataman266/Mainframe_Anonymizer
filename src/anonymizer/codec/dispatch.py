@@ -23,18 +23,36 @@ def _slice(field: Field, record: bytes) -> bytes:
     return record[field.offset:field.offset + field.length]
 
 
+def _format_numeric(value: Decimal, decimals: int, pad_to: int | None = None) -> str:
+    """Render a decoded numeric value without scientific notation.
+
+    decimals > 0 always uses fixed-point notation.  decimals == 0 renders a
+    sign-aware, zero-padded integer when ``pad_to`` is given (DISPLAY
+    numerics, where leading zeros are part of the on-file representation);
+    otherwise a plain sign-aware integer string (COMP / COMP-3, which have
+    no meaningful "leading zero" width).
+    """
+    if decimals > 0:
+        return format(value, "f")
+    number = int(value)
+    if pad_to:
+        digits = str(abs(number)).rjust(pad_to, "0")
+        return f"-{digits}" if number < 0 else digits
+    return str(number)
+
+
 def decode_field(field: Field, record: bytes, codepage: str) -> str:
     raw = _slice(field, record)
     try:
         if field.usage == "comp-3":
-            return str(unpack_comp3(raw, field.decimals))
+            value = unpack_comp3(raw, field.decimals)
+            return _format_numeric(value, field.decimals)
         if field.usage == "comp":
-            return str(decode_binary(raw, field.decimals, field.signed))
+            value = decode_binary(raw, field.decimals, field.signed)
+            return _format_numeric(value, field.decimals)
         if field.numeric:
             value = decode_zoned(raw, field.decimals, field.signed, codepage)
-            if field.decimals == 0:
-                return str(int(value)).rjust(field.total_digits, "0")
-            return str(value)
+            return _format_numeric(value, field.decimals, field.total_digits)
         return decode_text(raw, codepage)
     except (ValueError, UnicodeDecodeError) as exc:
         raise FieldCodecError(
