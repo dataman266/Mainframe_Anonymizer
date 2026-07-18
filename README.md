@@ -54,6 +54,10 @@ The wizard pre-fills a random seed. For real use, pick one seed per test-data
 universe (e.g. per environment or release cycle), record it in your vault,
 and reuse it for every related file.
 
+For the full details — cross-file joins, staggered file deliveries, what can
+silently break consistency, seed management, and security properties — see
+[docs/seed-masking.md](docs/seed-masking.md).
+
 ## The output file (`masked_output.dat`)
 The download in step 5 is a mainframe data file, not a CSV. It preserves the
 input's exact byte layout: same record length, same field positions, same
