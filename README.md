@@ -9,11 +9,15 @@ input so downstream ingestion jobs run unchanged.
 - Java 8+ on PATH (used only to parse the copybook)
 
 ## Setup
-    pip install -r requirements.txt
-    pip install -e .
+Run each command on its own line (PowerShell 5.1 does not support `&&`).
+If your machine has more than one Python, replace `python` with the launcher
+for a 3.10+ install, e.g. `py -3.10`:
+
+    python -m pip install -r requirements.txt
+    python -m pip install -e .
 
 ## Run
-    streamlit run app.py
+    python -m streamlit run app.py
 
 Then follow the 5 steps: Upload → Fields → Masking → Generate → Preview.
 Sample files to try it with are in `samples/` (banking customer + account
@@ -35,4 +39,4 @@ the primary view), and OCCURS DEPENDING ON (as the last field in the record).
 Fixed-length (FB) and variable-length (VB/RDW) files.
 
 ## Tests
-    py -3.10 -m pytest --cov=anonymizer --cov-fail-under=80
+    python -m pytest --cov=anonymizer --cov-fail-under=80
