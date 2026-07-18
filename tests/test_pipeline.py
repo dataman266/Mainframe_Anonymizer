@@ -5,7 +5,7 @@ import pytest
 from anonymizer import pipeline
 from anonymizer.codec.dispatch import FieldCodecError, decode_field, encode_field
 from anonymizer.copybook.model import Field, Layout, OdoInfo
-from anonymizer.engine.reader import iter_records
+from anonymizer.engine.reader import TruncatedRecordError, iter_records
 from anonymizer.engine.writer import write_record
 from anonymizer.pipeline import FieldPlan, default_plans, run_anonymization
 
@@ -235,3 +235,34 @@ def test_odo_roundtrip_preserves_length_and_counter(tmp_path):
     assert out_records[0][:2] == b"02"           # counter untouched
     assert out_records[1][:2] == b"01"
     assert out_records[0] != rec1                 # masked elements differ
+
+
+def test_truncated_record_error_includes_record_number(tmp_path):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    rec1 = b"02" + b"AAAAAAAA" + b"BBBBBBBB"    # count=2 -> valid
+    rec2 = b"01" + b"CCCCCCCC"                   # count=1 -> valid
+    rec3 = b"09" + b"1" * 16                     # count=9 -> outside 0..3
+    src.write_bytes(rec1 + rec2 + rec3)
+    layout = _odo_layout()
+    plans = [FieldPlan(field=CNT, rule="keep", enabled=False),
+             FieldPlan(field=ELEM0, rule="scramble", enabled=True),
+             FieldPlan(field=ELEM1, rule="scramble", enabled=True)]
+    with pytest.raises(TruncatedRecordError, match="record 3"):
+        run_anonymization(src, dst, layout, "ascii", plans, "s1", 3)
+
+
+def test_cache_falls_back_to_rereading_input_when_over_budget(tmp_path, monkeypatch):
+    src, dst = tmp_path / "in.dat", tmp_path / "out.dat"
+    _write_input(src, ROWS)                       # 3 records x RECLEN(20) bytes
+    monkeypatch.setattr(pipeline, "_CACHE_BUDGET_BYTES", 10)
+    calls: list[int] = []
+    original = pipeline.iter_records
+
+    def counting_iter_records(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(pipeline, "iter_records", counting_iter_records)
+    result = run_anonymization(src, dst, _layout(), "ascii", _plans(), "s1", 7)
+    assert result.records_written == 7
+    assert len(calls) > 1

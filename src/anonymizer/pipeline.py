@@ -11,23 +11,38 @@ Output is written to a sibling ``<output>.tmp`` file and only moved into
 place with ``os.replace`` once the whole run succeeds, so a failure partway
 through (a corrupt field, a cancelled run) never leaves a partial or
 misleading file at the destination path.
+
+Any error raised while advancing to the next record (a corrupt field
+decode, a malformed/truncated record) is re-raised with a "record N: "
+prefix so failures deep into a large run are locatable without re-running
+with extra instrumentation.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from anonymizer.codec.dispatch import FieldCodecError, decode_field, encode_field
 from anonymizer.copybook.model import Field, Layout
-from anonymizer.engine.reader import iter_records
+from anonymizer.engine.reader import TruncatedRecordError, iter_records
 from anonymizer.engine.writer import write_record
 from anonymizer.masking.classifier import suggest_rule
 from anonymizer.masking.rules import apply_rule, is_rule_compatible
 
 SAMPLE_RECORDS = 10
 _PROGRESS_EVERY = 500
+
+# Cap on how much raw input we hold in memory to serve synthesis cycles
+# (cycles beyond the first, when target_count exceeds the input's record
+# count) without re-opening and re-reading the file. Small inputs — the
+# case where many cycles are needed to reach a large target_count — always
+# fit comfortably under this budget. Oversized inputs need relatively few
+# cycles to reach any given target, so falling back to re-reading the file
+# for those is cheap; it is not worth holding a huge file fully in memory
+# just to save a handful of re-reads.
+_CACHE_BUDGET_BYTES = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -86,27 +101,6 @@ def mask_record(record: bytes, plans: list[FieldPlan], codepage: str,
     return bytes(out)
 
 
-def _should_cache_cycle_zero(input_path: Path, layout: Layout, rdw: bool,
-                             target_count: int) -> bool:
-    """Whether cycle 0 should cache raw records in memory for reuse by
-    later synthesis cycles, instead of re-opening and re-reading the input
-    file (and, for ODO, re-parsing every record header) on every cycle.
-
-    For fixed-length, non-RDW layouts the record count can be estimated
-    cheaply from the file size, so caching is only worth its memory cost
-    when synthesis will actually happen (target_count exceeds that
-    estimate). RDW and ODO layouts have no cheap size-based estimate, so we
-    always cache for them: input files are bounded to roughly 200MB by the
-    product target, making the memory cost acceptable, and it is far
-    cheaper than re-reading (and, for ODO, re-parsing) the whole file on
-    every synthesis cycle.
-    """
-    if rdw or layout.odo is not None or layout.record_length <= 0:
-        return True
-    estimate = os.path.getsize(input_path) // layout.record_length
-    return target_count > estimate
-
-
 def run_anonymization(input_path: Path, output_path: Path, layout: Layout,
                       codepage: str, plans: list[FieldPlan], seed: str,
                       target_count: int, rdw: bool = False,
@@ -117,9 +111,12 @@ def run_anonymization(input_path: Path, output_path: Path, layout: Layout,
     validate_plans(plans)
 
     tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    cache_enabled = _should_cache_cycle_zero(input_path, layout, rdw,
-                                             target_count)
-    cache: list[bytes] | None = None
+    # Cache of cycle 0's raw records, for reuse by later synthesis cycles.
+    # Stays a list while cycle 0 is under budget; flips to None permanently
+    # (for the rest of this run) the moment it would exceed the budget, at
+    # which point later cycles fall back to re-reading the input file.
+    cache: list[bytes] | None = []
+    cached_bytes = 0
 
     written = 0
     real_records = 0
@@ -133,14 +130,23 @@ def run_anonymization(input_path: Path, output_path: Path, layout: Layout,
                 using_cache = cycle > 0 and cache is not None
                 records = None if using_cache else iter_records(
                     input_path, layout, codepage, rdw=rdw)
-                source = cache if using_cache else records
+                source: Iterator[bytes] = iter(cache) if using_cache else records
                 try:
-                    for record in source:
+                    while True:
+                        try:
+                            record = next(source)
+                        except StopIteration:
+                            break
+                        except TruncatedRecordError as exc:
+                            raise TruncatedRecordError(
+                                f"record {written + 1}: {exc}") from exc
                         read_any = True
-                        if cycle == 0 and cache_enabled:
-                            if cache is None:
-                                cache = []
-                            cache.append(record)
+                        if cycle == 0 and cache is not None:
+                            cached_bytes += len(record)
+                            if cached_bytes > _CACHE_BUDGET_BYTES:
+                                cache = None
+                            else:
+                                cache.append(record)
                         capture = sample if (cycle == 0 and
                                              written < SAMPLE_RECORDS) else None
                         try:
